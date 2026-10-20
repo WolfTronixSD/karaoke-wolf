@@ -2208,5 +2208,5 @@
   renderHome();
 
   // Exposed for tests and curious wolves.
-  window.KaraokeWolf = { LIB, buildSong, parseTokens, noteToMidi, state: () => cur, beatNow, tune };
+  window.KaraokeWolf = { LIB, buildSong, parseTokens, noteToMidi, state: () => cur, beatNow, tune, eng };
 })();
