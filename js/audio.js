@@ -51,13 +51,24 @@
     ensure() {
       if (!this.ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
-        const ctx = (this.ctx = new AC());
+        let ctx;
+        // "balanced" gives the audio thread a bigger buffer, so busy phones
+        // don't stutter, while keeping the delay small enough to sing along.
+        try { ctx = new AC({ latencyHint: 'balanced' }); } catch (e) { ctx = new AC(); }
+        this.ctx = ctx;
         this.master = ctx.createGain();
-        this.master.gain.value = 0.9;
+        this.master.gain.value = 0.8;
         this.comp = ctx.createDynamicsCompressor();
         this.comp.threshold.value = -14;
         this.comp.ratio.value = 4;
-        this.master.connect(this.comp).connect(ctx.destination);
+        // a brick-wall limiter at the very end so nothing ever clips
+        this.limiter = ctx.createDynamicsCompressor();
+        this.limiter.threshold.value = -3;
+        this.limiter.knee.value = 0;
+        this.limiter.ratio.value = 20;
+        this.limiter.attack.value = 0.002;
+        this.limiter.release.value = 0.1;
+        this.master.connect(this.comp).connect(this.limiter).connect(ctx.destination);
 
         // Everything musical goes through musicBus so it can also be recorded.
         this.musicBus = ctx.createGain();
@@ -70,7 +81,7 @@
         this.sfxGain.connect(this.musicBus);
 
         this.reverb = ctx.createConvolver();
-        this.reverb.buffer = this._impulse(2.2, 2.5);
+        this.reverb.buffer = this._impulse(1.6, 2.5);
         this.reverbGain = ctx.createGain();
         this.reverbGain.gain.value = 0.22;
         this.reverb.connect(this.reverbGain).connect(this.musicBus);
@@ -188,19 +199,11 @@
       env.gain.setValueAtTime(peak, Math.max(t + S.attack, t + dur - 0.06));
       env.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.12);
 
-      const wave = this._glottal(S.tilt);
       const src = this._osc('sine', f, t);
-      src.setPeriodicWave(wave);
-      const src2 = this._osc('sine', f, t);
-      src2.setPeriodicWave(wave);
-      src2.detune.value = S.chorus;
+      src.setPeriodicWave(this._glottal(S.tilt));
       // slide into the note a little, like a real singer
-      if (onset) {
-        src.frequency.setValueAtTime(f * S.scoop, t);
-        src2.frequency.setValueAtTime(f * S.scoop, t);
-      }
+      if (onset) src.frequency.setValueAtTime(f * S.scoop, t);
       src.frequency.exponentialRampToValueAtTime(f, t + 0.08);
-      src2.frequency.exponentialRampToValueAtTime(f, t + 0.08);
       const lfo = this._osc('sine', S.vibRate, t);
       const depth = ctx.createGain();
       depth.gain.setValueAtTime(0, t);
@@ -208,22 +211,14 @@
       depth.gain.linearRampToValueAtTime(dur > 0.5 ? f * S.vibDepth : f * S.vibDepth * 0.3, t + Math.min(0.7, dur));
       lfo.connect(depth);
       depth.connect(src.frequency);
-      depth.connect(src2.frequency);
 
       const pre = ctx.createGain();
-      pre.gain.value = 0.5;
+      pre.gain.value = 0.7;
       src.connect(pre);
-      src2.connect(pre);
-      let feed = pre;
-      if (S.grit) {
-        const ws = ctx.createWaveShaper();
-        ws.curve = this._curve(S.grit);
-        feed = pre.connect(ws);
-      }
       const tilt = ctx.createBiquadFilter();
       tilt.type = 'lowpass';
       tilt.frequency.value = vowel === 'm' ? 900 : S.bright;
-      feed.connect(tilt);
+      pre.connect(tilt);
       const mix = ctx.createGain();
       // a little of the dry source keeps consonants and edges crisp
       const dry = ctx.createGain();
@@ -238,40 +233,59 @@
         g.gain.value = gain;
         tilt.connect(bp).connect(g).connect(mix);
       });
-      // presence boost for clarity
+      mix.connect(env);
+      const nodes = [src, lfo];
+      // a little breath noise on longer notes
+      if (dur > 0.35 && S.breath) {
+        const breath = ctx.createBufferSource();
+        breath.buffer = this.noise;
+        breath._startAt = t;
+        const bf = ctx.createBiquadFilter();
+        bf.type = 'bandpass';
+        bf.frequency.value = F[1][0];
+        const bg = ctx.createGain();
+        bg.gain.value = S.breath;
+        breath.connect(bf).connect(bg).connect(env);
+        nodes.push(breath);
+      }
+      // grit and the presence boost are shared per singer (cheaper than per note)
+      env.connect(this._singerBus(singer, out));
+      env.connect(this.reverb);
+      if (onset) this._noise(t, 0.03, 'highpass', 3500, 0.1, out);
+      const end = t + dur + 0.2;
+      nodes.forEach((n) => this._track(n, end));
+      return nodes;
+    }
+
+    _singerBus(singer, out) {
+      this._buses = this._buses || new Map();
+      const key = singer + '|' + (out === this.guideGain ? 'g' : out === this.sfxGain ? 's' : Math.random());
+      let bus = this._buses.get(key);
+      if (bus) return bus;
+      const S = SINGERS[singer] || SINGERS.wolfie;
+      const ctx = this.ctx;
+      bus = ctx.createGain();
+      let node = bus;
+      if (S.grit) {
+        const ws = ctx.createWaveShaper();
+        ws.curve = this._curve(S.grit);
+        node = node.connect(ws);
+      }
       const pres = ctx.createBiquadFilter();
       pres.type = 'peaking';
       pres.frequency.value = 3000;
       pres.Q.value = 1;
       pres.gain.value = S.presence;
-      mix.connect(pres).connect(env);
-      // a little breath noise through the same envelope
-      const breath = ctx.createBufferSource();
-      breath.buffer = this.noise;
-      breath._startAt = t;
-      const bf = ctx.createBiquadFilter();
-      bf.type = 'bandpass';
-      bf.frequency.value = F[1][0];
-      bf.Q.value = 1;
-      const bg = ctx.createGain();
-      bg.gain.value = S.breath;
-      breath.connect(bf).connect(bg).connect(env);
-      env.connect(out);
-      env.connect(this.reverb);
-      if (onset) this._noise(t, 0.03, 'highpass', 3500, 0.1, out);
-      const end = t + dur + 0.2;
-      this._track(src, end);
-      this._track(src2, end);
-      this._track(lfo, end);
-      this._track(breath, end);
-      return [src, src2, lfo, breath];
+      node.connect(pres).connect(out);
+      if (key.endsWith('g') || key.endsWith('s')) this._buses.set(key, bus);
+      return bus;
     }
 
     // Glottal pulse wave: rich harmonics that fall off like a real voice.
     _glottal(tilt) {
       this._waves = this._waves || {};
       if (!this._waves[tilt]) {
-        const N = 48;
+        const N = 32;
         const real = new Float32Array(N);
         const imag = new Float32Array(N);
         for (let n = 1; n < N; n++) imag[n] = 1 / Math.pow(n, tilt);
@@ -329,38 +343,42 @@
       env.connect(lp);
       lp.connect(this.backingGain);
       lp.connect(this.reverb);
-      for (const m of midis) {
-        for (const det of [-6, 6]) {
-          const o = this._osc('sawtooth', mtof(m), t);
-          o.detune.value = det;
-          o.connect(env);
-          this._track(o, t + dur + 0.3);
-        }
-      }
+      midis.forEach((m, i) => {
+        const o = this._osc('sawtooth', mtof(m), t);
+        o.detune.value = [-6, 5, 2][i % 3];
+        o.connect(env);
+        this._track(o, t + dur + 0.3);
+      });
     }
 
-    // Distorted electric guitar power chord (root, fifth, octave).
-    guitar(midi, t, dur, vel = 0.1) {
+    // Distorted electric guitar power chord (root + fifth). All notes share one
+    // amp chain (drive -> shaper -> filters) so phones aren't building a
+    // waveshaper per eighth note.
+    _gtrAmp() {
+      if (this._gtrBus) return this._gtrBus;
       const ctx = this.ctx;
-      if (!this._gtrCurve) this._gtrCurve = this._curve(6);
       const ws = ctx.createWaveShaper();
-      ws.curve = this._gtrCurve;
-      ws.oversample = '2x';
-      const pre = ctx.createGain();
-      pre.gain.value = 0.6;
+      ws.curve = this._curve(6);
+      const lowcut = ctx.createBiquadFilter();
+      lowcut.type = 'highpass';
+      lowcut.frequency.value = 90;
       const cab = ctx.createBiquadFilter();
       cab.type = 'lowpass';
       cab.frequency.value = 2600;
       cab.Q.value = 0.8;
-      const lowcut = ctx.createBiquadFilter();
-      lowcut.type = 'highpass';
-      lowcut.frequency.value = 90;
-      const env = this._env(t, dur, vel, 0.004, 0.06);
-      pre.connect(ws).connect(lowcut).connect(cab).connect(env).connect(this.backingGain);
-      for (const [iv, det] of [[0, -7], [7, 5], [12, 0]]) {
+      const out = ctx.createGain();
+      out.gain.value = 0.1;
+      ws.connect(lowcut).connect(cab).connect(out).connect(this.backingGain);
+      return (this._gtrBus = ws);
+    }
+
+    guitar(midi, t, dur, vel = 0.1) {
+      const env = this._env(t, dur, 0.6 * vel / 0.1, 0.004, 0.06);
+      env.connect(this._gtrAmp());
+      for (const [iv, det] of [[0, -7], [7, 5]]) {
         const o = this._osc('sawtooth', mtof(midi + iv), t);
         o.detune.value = det;
-        o.connect(pre);
+        o.connect(env);
         this._track(o, t + dur + 0.1);
       }
     }
