@@ -44,6 +44,7 @@
     rangeLow: null,
     rangeHigh: null,
   }, store.get('settings', {}));
+  if (!settings.singer) settings.singer = settings.voiceGuide === false ? 'synth' : 'wolfie';
   const saveSettings = () => store.set('settings', settings);
 
   const TOLERANCE = { easy: 1.1, normal: 0.7, pro: 0.4 };
@@ -206,6 +207,19 @@
             if (pos === 2 && Math.floor(bar / bpb) % 2) ev.push({ b: b + 0.5, k: 'kick', v: 0.6 });
             if (pos === 1 || pos === 3) ev.push({ b, k: 'snare' });
             break;
+          case 'rock': {
+            const gtr = 40 + ((c.root - 4 + 12) % 12);
+            for (const off of [0, 0.5]) {
+              ev.push({ b: b + off, k: 'guitar', m: gtr, d: 0.42, v: off ? 0.07 : 0.1 });
+              ev.push({ b: b + off, k: 'bass', m: root, d: 0.42 });
+              ev.push({ b: b + off, k: 'hat', v: off ? 0.5 : 0.8 });
+            }
+            if (pos === 0 || pos === 2) ev.push({ b, k: 'kick' });
+            if (pos === 2) ev.push({ b: b + 0.5, k: 'kick', v: 0.7 });
+            if (pos === 1 || pos === 3) ev.push({ b, k: 'snare', v: 1.1 });
+            if (pos === 0 && Math.floor(bar / bpb) % 4 === 0) ev.push({ b, k: 'crash' });
+            break;
+          }
           case 'gentle':
             if (i === 0) ev.push({ b, k: 'bass', m: root, d: unit * 0.95 });
             ev.push({ b, k: 'pluck', m: tones[(pos * 2) % 3] + 12, v: 0.06 });
@@ -273,15 +287,64 @@
     $('.mic-label', b).textContent = mic.on ? 'Mic on' : 'Mic off';
   }
 
+  // Saved takes live in IndexedDB so they survive a reload (memory if that fails).
+  const takesDB = (() => {
+    let dbp = null;
+    const mem = [];
+    function open() {
+      if (!dbp) {
+        dbp = new Promise((res) => {
+          try {
+            const r = indexedDB.open('karaoke-wolf', 1);
+            r.onupgradeneeded = () => r.result.createObjectStore('takes', { keyPath: 'id' });
+            r.onsuccess = () => res(r.result);
+            r.onerror = () => res(null);
+          } catch (e) {
+            res(null);
+          }
+        });
+      }
+      return dbp;
+    }
+    async function tx(mode, fn) {
+      const db = await open();
+      if (!db) return null;
+      return new Promise((res, rej) => {
+        const t = db.transaction('takes', mode);
+        const req = fn(t.objectStore('takes'));
+        t.oncomplete = () => res(req.result === undefined ? true : req.result);
+        t.onerror = () => rej(t.error);
+      });
+    }
+    return {
+      async add(take) {
+        try { if (await tx('readwrite', (st) => st.put(take))) return; } catch (e) { /* fall back to memory */ }
+        mem.push(take);
+      },
+      async list() {
+        let all = [];
+        try { all = (await tx('readonly', (st) => st.getAll())) || []; } catch (e) { /* none */ }
+        return all.concat(mem).sort((a, b) => b.date - a.date);
+      },
+      async remove(id) {
+        try { await tx('readwrite', (st) => st.delete(id)); } catch (e) { /* ignore */ }
+        const i = mem.findIndex((t) => t.id === id);
+        if (i >= 0) mem.splice(i, 1);
+      },
+    };
+  })();
+
+  // Starts recording you + the music (only when Record is on and the mic is on).
   function recStart() {
-    if (!settings.record || !mic.on || typeof MediaRecorder === 'undefined') return;
-    recDiscard();
+    if (rec.mr || !cur || cur.listen || !settings.record || !mic.on || typeof MediaRecorder === 'undefined') return;
     if (!eng.recDest) {
       eng.recDest = eng.ctx.createMediaStreamDestination();
       eng.musicBus.connect(eng.recDest);
     }
     if (rec.linkedSource !== mic.source) {
-      mic.source.connect(eng.recDest);
+      const g = eng.ctx.createGain();
+      g.gain.value = 1.4;
+      mic.source.connect(g).connect(eng.recDest);
       rec.linkedSource = mic.source;
     }
     try {
@@ -290,31 +353,92 @@
       mr.ondataavailable = (e) => { if (e.data.size) rec.chunks.push(e.data); };
       mr.start(500);
       rec.mr = mr;
+      rec.song = cur.song;
+      rec.acc = 0;
+      rec.t0 = performance.now();
+      document.body.classList.add('recording');
     } catch (e) {
       rec.mr = null;
     }
   }
 
-  function recDiscard() {
-    if (rec.mr) {
-      rec.mr.onstop = null;
-      try { rec.mr.stop(); } catch (e) { /* already stopped */ }
-      rec.mr = null;
+  function recPause() {
+    if (rec.mr && rec.mr.state === 'recording') {
+      rec.mr.pause();
+      rec.acc += performance.now() - rec.t0;
+      document.body.classList.remove('recording');
     }
   }
 
-  function recStop(cb) {
+  function recResume() {
+    if (rec.mr && rec.mr.state === 'paused') {
+      rec.mr.resume();
+      rec.t0 = performance.now();
+      document.body.classList.add('recording');
+      return true;
+    }
+    return false;
+  }
+
+  // Stops the recording and saves it as a take. Calls back with its URL (or null).
+  function recSave(extra, cb) {
     const mr = rec.mr;
-    if (!mr) return cb(null);
+    document.body.classList.remove('recording');
+    if (!mr) return cb && cb(null);
     rec.mr = null;
+    const secs = (rec.acc + (mr.state === 'recording' ? performance.now() - rec.t0 : 0)) / 1000;
+    const song = rec.song;
     mr.onstop = () => {
-      if (rec.url) URL.revokeObjectURL(rec.url);
       const blob = new Blob(rec.chunks, { type: mr.mimeType || 'audio/webm' });
-      rec.url = blob.size ? URL.createObjectURL(blob) : null;
-      cb(rec.url);
+      if (!blob.size || secs < 2) return cb && cb(null);
+      const take = Object.assign({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: Date.now(), secs,
+        songId: song.id, title: song.title, emoji: song.emoji, blob }, extra || {});
+      takesDB.add(take).then(() => {
+        award('record');
+        if (!extra) toast('📼 Take saved! Hear it any time in 🎧 Takes.', true);
+        if (screen === 'takes') renderTakes();
+      });
+      cb && cb(URL.createObjectURL(blob));
     };
     if (mr.state === 'paused') mr.resume();
     mr.stop();
+  }
+
+  const fmtSecs = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  let takeUrls = [];
+  async function renderTakes() {
+    takeUrls.forEach((u) => URL.revokeObjectURL(u));
+    takeUrls = [];
+    const list = await takesDB.list();
+    const box = $('#takes-list');
+    box.innerHTML = '';
+    $('#takes-empty').hidden = list.length > 0;
+    for (const t of list) {
+      const url = URL.createObjectURL(t.blob);
+      takeUrls.push(url);
+      const el = document.createElement('div');
+      el.className = 'take card';
+      const when = new Date(t.date).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      el.innerHTML = `
+        <div class="take-head"><span class="take-emoji"></span><div><b class="take-title"></b><small class="take-meta"></small></div>
+          <span class="take-grade"></span></div>
+        <audio controls preload="metadata"></audio>
+        <div class="row"><a class="btn mini dl">⬇ Download</a><button class="btn mini ghost danger del">🗑 Delete</button></div>`;
+      $('.take-emoji', el).textContent = t.emoji;
+      $('.take-title', el).textContent = t.title;
+      $('.take-meta', el).textContent = `${when} · ${fmtSecs(t.secs)}${t.score != null ? ' · ' + t.score.toLocaleString() + ' pts' : ''}`;
+      $('.take-grade', el).textContent = t.grade || '';
+      $('audio', el).src = url;
+      const dl = $('.dl', el);
+      dl.href = url;
+      dl.download = `karaoke-wolf-${t.songId}-${new Date(t.date).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.${(t.blob.type || '').includes('ogg') ? 'ogg' : (t.blob.type || '').includes('mp4') ? 'm4a' : 'webm'}`;
+      $('.del', el).addEventListener('click', async () => {
+        if (!confirm(`Delete this take of "${t.title}"?`)) return;
+        await takesDB.remove(t.id);
+        renderTakes();
+      });
+      box.appendChild(el);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -495,6 +619,7 @@
     $$('.nav-btn[data-go]').forEach((b) => b.classList.toggle('active', b.dataset.go === name));
     if (name === 'home') renderHome();
     if (name === 'badges') renderBadges();
+    if (name === 'takes') renderTakes();
     window.scrollTo({ top: 0 });
   }
 
@@ -643,6 +768,7 @@
       case 'bass': eng.bass(e.m + T, t, d); break;
       case 'pad': eng.pad(e.ms.map((m) => m + T), t, d); break;
       case 'pluck': eng.pluck(e.m + T, t, e.v); break;
+      case 'guitar': eng.guitar(e.m + T, t, d, e.v); break;
       case 'kick': eng.kick(t, e.v || 1); break;
       case 'snare': eng.snare(t, e.v || 1); break;
       case 'hat': eng.hat(t, e.v || 1); break;
@@ -652,16 +778,16 @@
   }
 
   function singNote(e, midi, t, d) {
-    if (settings.voiceGuide) eng.voice(midi, t, Math.max(0.1, d * 0.97), e.v, e.on);
-    else eng.guide(midi, t, Math.max(0.08, d * 0.95));
+    if (settings.singer === 'synth') eng.guide(midi, t, Math.max(0.08, d * 0.95));
+    else eng.voice(midi, t, Math.max(0.1, d * 0.97), e.v, e.on, eng.guideGain, settings.singer);
   }
 
   // A reference note for the Voice Lab, sung or synth depending on the setting.
   function refTone(midi, dur = 1.2) {
     eng.ensure();
     applyVolumes();
-    if (settings.voiceGuide) eng.voice(midi, eng.now + 0.03, dur, 'a', false, eng.sfxGain);
-    else eng.tone(midi, dur);
+    if (settings.singer === 'synth') eng.tone(midi, dur);
+    else eng.voice(midi, eng.now + 0.03, dur, 'a', false, eng.sfxGain, settings.singer);
   }
 
   // Sing one lyric line on its own (with the voice), so you can hear the tune.
@@ -706,13 +832,13 @@
     P.playing = false;
     clearInterval(P.timer);
     eng.stopAll();
-    if (rec.mr && rec.mr.state === 'recording') rec.mr.pause();
+    recPause();
     setPlayButton();
   }
 
   function stopPlayback() {
     pause();
-    recDiscard();
+    recSave();
     document.body.classList.remove('hype');
   }
 
@@ -727,12 +853,12 @@
       seekTo(back);
     }
     const from = P.pausedBeat;
-    if (from < 0.01) recStart();
-    else if (rec.mr && rec.mr.state === 'paused') rec.mr.resume();
+    if (!recResume()) recStart();
     play(from);
   }
 
   function restart() {
+    recSave();
     openStage(cur.song);
     recStart();
     play(0);
@@ -1317,7 +1443,9 @@
     pause();
     P.pausedBeat = song.totalBeats;
     document.body.classList.remove('hype');
-    recStop((url) => showResults(url));
+    const res = computeResults();
+    const G = GRADES.find((g) => res.acc >= g.min);
+    recSave(mic.on ? { score: cur.score, grade: G.g } : {}, (url) => showResults(url));
   }
 
   function computeResults() {
@@ -1403,7 +1531,6 @@
     if (url) {
       $('#rs-audio').src = url;
       $('#rs-download').href = url;
-      award('record');
     }
     cur.result = { acc: res.acc, grade: G.g, lineAcc: res.lineAcc };
 
@@ -1650,7 +1777,7 @@
     $$('#tu-keys [data-m]').forEach((k) => k.classList.toggle('on', +k.dataset.m === tune.target));
     if (tune.stopDrone) {
       tune.stopDrone();
-      tune.stopDrone = eng.drone(tune.target);
+      tune.stopDrone = eng.drone(tune.target, 'a', settings.singer === 'synth' ? 'wolfie' : settings.singer);
     } else if (play) {
       refTone(tune.target, 1.4);
     }
@@ -1659,7 +1786,7 @@
 
   function toggleDrone(on) {
     if (tune.stopDrone) { tune.stopDrone(); tune.stopDrone = null; }
-    if (on) tune.stopDrone = eng.drone(tune.target);
+    if (on) tune.stopDrone = eng.drone(tune.target, 'a', settings.singer === 'synth' ? 'wolfie' : settings.singer);
     $('#tu-drone').setAttribute('aria-pressed', String(on));
   }
 
@@ -1843,7 +1970,17 @@
     settings.record = !settings.record;
     saveSettings();
     $('#btn-rec').setAttribute('aria-pressed', String(settings.record));
-    toast(settings.record ? (mic.on ? '⏺ Your next take will be recorded.' : '⏺ Recording on. Turn on the mic too!') : '⏺ Recording off', true);
+    if (settings.record) {
+      const armed = () => {
+        toast('⏺ Recording is on: press ▶ and sing. Your voice + the music get saved in 🎧 Takes.', true);
+        if (P.playing) recStart();
+      };
+      if (mic.on) armed();
+      else enableMic().then((ok) => ok && armed());
+    } else {
+      recSave();
+      toast('⏺ Recording off', true);
+    }
   });
   $('#btn-listen').addEventListener('click', () => cur && setListen(!cur.listen));
   $('#btn-hear').addEventListener('click', () => {
@@ -1851,15 +1988,22 @@
     if (cur.listen) setListen(false);
     previewLine(cur.song.lines[lineIndexAt(beatNow())]);
   });
-  function setVoiceGuide(on) {
-    settings.voiceGuide = on;
+  const singerSel = $('#sel-singer');
+  singerSel.value = settings.singer;
+  singerSel.addEventListener('change', () => {
+    settings.singer = singerSel.value;
     saveSettings();
-    const b = $('#btn-voice');
-    b.textContent = on ? '🗣️ Singer' : '🎹 Synth';
-    b.title = on ? 'Guide melody is sung by a voice. Tap for a synth instead.' : 'Guide melody is a synth. Tap for a singing voice.';
-  }
-  $('#btn-voice').addEventListener('click', () => setVoiceGuide(!settings.voiceGuide));
-  setVoiceGuide(settings.voiceGuide);
+    if (tune.stopDrone) toggleDrone(true);
+    // a quick hello so you can hear the new singer
+    if (cur && !P.playing) {
+      eng.ensure();
+      applyVolumes();
+      const m = cur.song.notes[0].midi + cur.transpose;
+      singNote({ v: 'a', on: true }, m, eng.now + 0.05, 0.35);
+      singNote({ v: 'u', on: true }, m + 4, eng.now + 0.45, 0.35);
+      singNote({ v: 'o', on: true }, m + 7, eng.now + 0.85, 0.7);
+    }
+  });
   $('#btn-sheet').addEventListener('click', () => { $('#sheet').hidden = !$('#sheet').hidden; });
   $('#sheet-close').addEventListener('click', () => { $('#sheet').hidden = true; });
 
@@ -1940,6 +2084,7 @@
 
   // Results
   $('#rs-again').addEventListener('click', () => { $('#results').hidden = true; restart(); });
+  $('#rs-takes').addEventListener('click', () => { $('#results').hidden = true; show('takes'); });
   $('#rs-home').addEventListener('click', () => { $('#results').hidden = true; show('home'); });
   $('#rs-practice').addEventListener('click', () => {
     $('#results').hidden = true;

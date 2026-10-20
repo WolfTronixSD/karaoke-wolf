@@ -368,3 +368,19 @@ body.listening .listen-banner { display: block; }
   .clock b { font-size: 13px; }
   .clock small { font-size: 9px; }
 }
+
+/* ---------- recording + takes ---------- */
+.rec-badge { position: absolute; left: 12px; top: 10px; display: none; font-weight: 900; font-size: 13px; color: #fff; background: var(--red);
+  padding: 3px 10px; border-radius: 999px; box-shadow: 0 0 14px #ff5c7a99; animation: blink 1s steps(2) infinite; }
+body.recording .rec-badge { display: block; }
+@keyframes blink { 50% { opacity: .45; } }
+.takes-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.take { display: flex; flex-direction: column; gap: 10px; }
+.take-head { display: flex; align-items: center; gap: 10px; }
+.take-emoji { font-size: 34px; }
+.take-head b { display: block; }
+.take-head small { color: var(--muted); }
+.take-grade { margin-left: auto; font-family: var(--display); font-size: 28px; color: var(--yellow); }
+.take audio { width: 100%; }
+.take .row { margin-top: 0; justify-content: space-between; }
+#sel-singer { padding: 4px 8px; font-size: 13px; }
