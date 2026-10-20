@@ -9,6 +9,7 @@
   const lerp = (a, b, t) => a + (b - a) * t;
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const { midiName } = window.KWPitch;
+  const { vowelOf } = window.KWAudio;
 
   // ------------------------------------------------------------------
   // Storage + settings
@@ -37,6 +38,7 @@
     headphones: false,
     echo: false,
     ding: true,
+    voiceGuide: true,
     disco: true,
     record: false,
     rangeLow: null,
@@ -176,7 +178,7 @@
     const ev = [];
     const { bpb, countIn, endBar } = song;
     for (let b = 0; b < countIn; b++) ev.push({ b, k: 'click', acc: b % bpb === 0 });
-    for (const n of song.notes) ev.push({ b: n.t, k: 'guide', m: n.midi, d: n.d });
+    for (const n of song.notes) ev.push({ b: n.t, k: 'guide', m: n.midi, d: n.d, v: vowelOf(n.syl.text), on: n.syl.notes[0] === n });
 
     const unit = bpb === 4 ? 2 : bpb === 6 ? 3 : bpb;
     let prev = CHORDS[0];
@@ -461,6 +463,7 @@
     { id: 'night', ic: '🦉', name: 'Night Wolf', desc: 'Sing between midnight and 5am' },
     { id: 'practice', ic: '🔁', name: 'Practice Makes Pawfect', desc: 'Loop a line 5 times' },
     { id: 'range', ic: '🎢', name: 'Range Rover', desc: 'Measure a range of 1.5 octaves or more' },
+    { id: 'tune', ic: '🎚️', name: 'Note Ninja', desc: 'Lock 10 notes in Tune Mode' },
     { id: 'ear', ic: '👂', name: 'Golden Ear', desc: 'Match 5 notes in a row in the Voice Lab' },
     { id: 'record', ic: '📼', name: 'Studio Wolf', desc: 'Record a performance' },
     { id: 'slow', ic: '🐢', name: 'Slow and Steady', desc: 'Finish a song at 70% tempo or slower' },
@@ -485,7 +488,8 @@
   let screen = 'home';
   function show(name) {
     if (screen === 'stage' && name !== 'stage') stopPlayback();
-    if (screen === 'lab' && name !== 'lab') matchStop();
+    if (screen === 'lab' && name !== 'lab') { matchStop(); toggleDrone(false); }
+    if (name !== 'stage') $('#sheet').hidden = true;
     screen = name;
     $$('.screen').forEach((s) => s.classList.toggle('active', s.id === 'screen-' + name));
     $$('.nav-btn[data-go]').forEach((b) => b.classList.toggle('active', b.dataset.go === name));
@@ -582,7 +586,11 @@
       finished: false,
       lastBeat: -1,
       lastDing: 0,
+      listen: false,
+      preview: null,
     };
+    document.body.classList.remove('listening');
+    $('#btn-listen').setAttribute('aria-pressed', 'false');
     P.pausedBeat = 0;
     $('#st-title').textContent = song.title;
     $('#st-emoji').textContent = song.emoji;
@@ -631,7 +639,7 @@
     const T = cur.transpose;
     const d = (e.d || 0) * P.spb;
     switch (e.k) {
-      case 'guide': eng.guide(e.m + T, t, Math.max(0.08, d * 0.95)); break;
+      case 'guide': singNote(e, e.m + T, t, d); break;
       case 'bass': eng.bass(e.m + T, t, d); break;
       case 'pad': eng.pad(e.ms.map((m) => m + T), t, d); break;
       case 'pluck': eng.pluck(e.m + T, t, e.v); break;
@@ -640,6 +648,55 @@
       case 'hat': eng.hat(t, e.v || 1); break;
       case 'crash': eng.crash(t); break;
       case 'click': eng.click(t, e.acc); break;
+    }
+  }
+
+  function singNote(e, midi, t, d) {
+    if (settings.voiceGuide) eng.voice(midi, t, Math.max(0.1, d * 0.97), e.v, e.on);
+    else eng.guide(midi, t, Math.max(0.08, d * 0.95));
+  }
+
+  // A reference note for the Voice Lab, sung or synth depending on the setting.
+  function refTone(midi, dur = 1.2) {
+    eng.ensure();
+    applyVolumes();
+    if (settings.voiceGuide) eng.voice(midi, eng.now + 0.03, dur, 'a', false, eng.sfxGain);
+    else eng.tone(midi, dur);
+  }
+
+  // Sing one lyric line on its own (with the voice), so you can hear the tune.
+  function previewLine(line) {
+    if (!cur) return;
+    if (P.playing) pause();
+    eng.ensure();
+    applyVolumes();
+    eng.stopAll();
+    const spb = 60 / (cur.song.bpm * settings.tempo);
+    const t0 = eng.now + 0.1 - line.start * spb;
+    for (const n of line.notes) {
+      singNote({ v: vowelOf(n.syl.text), on: n.syl.notes[0] === n }, n.midi + cur.transpose, t0 + n.t * spb, n.d * spb);
+    }
+    // Let the lyrics and lane follow along while it plays.
+    P.pausedBeat = line.start - 0.5;
+    cur.preview = { t0, spb, end: line.end + 0.3, from: Math.max(0, line.start - cur.song.bpb) };
+    toast(`🔊 Line ${line.i + 1}: listen, then sing it back!`, true);
+  }
+
+  function setListen(on) {
+    if (!cur) return;
+    const song = cur.song;
+    if (on) {
+      openStage(song);
+      cur.listen = true;
+      document.body.classList.add('listening');
+      $('#btn-listen').setAttribute('aria-pressed', 'true');
+      play(0);
+      eng.setGuideVolume(Math.max(0.9, settings.guideVol));
+      mc('👂 Listen mode: just listen to how it goes. Your turn next!', true);
+    } else {
+      document.body.classList.remove('listening');
+      $('#btn-listen').setAttribute('aria-pressed', 'false');
+      openStage(song);
     }
   }
 
@@ -663,6 +720,12 @@
     if (!cur) return;
     if (P.playing) return pause();
     if (cur.finished) return restart();
+    if (cur.preview) {
+      const back = cur.preview.from;
+      cur.preview = null;
+      eng.stopAll();
+      seekTo(back);
+    }
     const from = P.pausedBeat;
     if (from < 0.01) recStart();
     else if (rec.mr && rec.mr.state === 'paused') rec.mr.resume();
@@ -1172,6 +1235,15 @@
       const acc = document.createElement('span');
       acc.className = 'acc';
       li.appendChild(acc);
+      const hear = document.createElement('button');
+      hear.className = 'hear';
+      hear.textContent = '🔊';
+      hear.title = 'Hear this line';
+      hear.addEventListener('click', (e) => {
+        e.stopPropagation();
+        previewLine(l);
+      });
+      li.prepend(hear);
       li.addEventListener('click', () => {
         seekTo(l.start - cur.song.bpb);
         if (cur.loopLine != null) cur.loopLine = l.i;
@@ -1188,8 +1260,16 @@
   function stageFrame(reading, dt) {
     const beat = beatNow();
     const song = cur.song;
+    if (cur.preview && !P.playing) {
+      const pb = (eng.now - cur.preview.t0) / cur.preview.spb;
+      if (pb > cur.preview.end) {
+        const from = cur.preview.from;
+        cur.preview = null;
+        seekTo(from);
+      } else P.pausedBeat = pb;
+    }
     if (P.playing) {
-      scoreFrame(beat, reading, dt);
+      if (!cur.listen) scoreFrame(beat, reading, dt);
       if (cur.loopLine != null) {
         const L = song.lines[cur.loopLine];
         if (beat > L.end + 0.75) {
@@ -1225,6 +1305,11 @@
 
   function finish() {
     if (cur.finished) return;
+    if (cur.listen) {
+      setListen(false);
+      mc('Your turn! Press ▶ and sing it like you just heard. 🎤', true);
+      return;
+    }
     const song = cur.song;
     for (let i = cur.ni; i < song.notes.length; i++) finalizeNote(song.notes[i]);
     cur.ni = song.notes.length;
@@ -1427,6 +1512,7 @@
       lab.stable = [];
     }
     matchFrame(reading, dt);
+    tuneFrame(reading, dt);
   }
 
   function matchNext() {
@@ -1443,7 +1529,7 @@
 
   function matchPlay() {
     if (match.target == null) return;
-    eng.tone(match.target, 1.2);
+    refTone(match.target, 1.2);
     match.listenUntil = performance.now() + 1200;
     match.deadline = performance.now() + 13000;
     $('#mt-hint').textContent = '👂 Listen...';
@@ -1515,6 +1601,202 @@
   }
 
   // ------------------------------------------------------------------
+  // Tune Mode: pick a note, hear it, slide onto it and hold it
+  // ------------------------------------------------------------------
+
+  const SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
+  const tune = { target: 60, hold: 0, locks: 0, trail: [], stopDrone: null, climb: false, climbPos: 0, climbRoot: 60, cool: 0 };
+  const TUNE_LOCK = 0.3; // semitones (30 cents)
+  const TUNE_HOLD = 1.5; // seconds
+
+  (function buildTuneKeys() {
+    const box = $('#tu-keys');
+    const whites = [];
+    for (let m = 48; m <= 72; m++) if (![1, 3, 6, 8, 10].includes(m % 12)) whites.push(m);
+    const w = 100 / whites.length;
+    whites.forEach((m, i) => {
+      const k = document.createElement('button');
+      k.className = 'wk';
+      k.dataset.m = m;
+      k.style.left = i * w + '%';
+      k.style.width = w + '%';
+      k.innerHTML = `<b>${midiName(m)}</b>`;
+      k.setAttribute('aria-label', midiName(m));
+      box.appendChild(k);
+      if ([0, 2, 5, 7, 9].includes(m % 12) && m < 72) {
+        const b = document.createElement('button');
+        b.className = 'bk';
+        b.dataset.m = m + 1;
+        b.style.left = (i + 1) * w - w * 0.3 + '%';
+        b.style.width = w * 0.6 + '%';
+        b.setAttribute('aria-label', midiName(m + 1));
+        box.appendChild(b);
+      }
+    });
+    box.addEventListener('click', (e) => {
+      const k = e.target.closest('[data-m]');
+      if (!k) return;
+      tune.climb = false;
+      $('#tu-climb').setAttribute('aria-pressed', 'false');
+      setTuneTarget(+k.dataset.m, true);
+    });
+  })();
+
+  function setTuneTarget(m, play) {
+    tune.target = clamp(m, 40, 84);
+    tune.hold = 0;
+    tune.trail = [];
+    $('#tu-target').textContent = midiName(tune.target);
+    $$('#tu-keys [data-m]').forEach((k) => k.classList.toggle('on', +k.dataset.m === tune.target));
+    if (tune.stopDrone) {
+      tune.stopDrone();
+      tune.stopDrone = eng.drone(tune.target);
+    } else if (play) {
+      refTone(tune.target, 1.4);
+    }
+    $('#tu-status').textContent = mic.on ? '🎤 Slide your voice onto the line' : '🎤 Turn on the mic, then sing the note';
+  }
+
+  function toggleDrone(on) {
+    if (tune.stopDrone) { tune.stopDrone(); tune.stopDrone = null; }
+    if (on) tune.stopDrone = eng.drone(tune.target);
+    $('#tu-drone').setAttribute('aria-pressed', String(on));
+  }
+
+  function climbNote(pos) {
+    // up the major scale for 8 notes, then back down
+    const up = pos <= 7 ? pos : 14 - pos;
+    let m = tune.climbRoot;
+    for (let i = 0; i < up; i++) m += SCALE_STEPS[i];
+    return m;
+  }
+
+  function tuneFrame(reading, dt) {
+    const cv = $('#tu-graph');
+    const dpr = devicePixelRatio || 1;
+    const W = cv.clientWidth;
+    const H = cv.clientHeight;
+    if (!W) return;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const now = performance.now();
+    const RANGE = 3;
+    const y = (d) => H / 2 - (clamp(d, -RANGE, RANGE) / RANGE) * (H / 2 - 10);
+
+    let diff = null;
+    if (reading) diff = foldDiff(reading.midi, tune.target);
+    tune.trail.push({ t: now, d: diff });
+    while (tune.trail.length && now - tune.trail[0].t > 6000) tune.trail.shift();
+
+    // bands
+    g.fillStyle = 'rgba(77,255,145,0.10)';
+    g.fillRect(0, y(0.75), W, y(-0.75) - y(0.75));
+    g.fillStyle = 'rgba(77,255,145,0.22)';
+    g.fillRect(0, y(TUNE_LOCK), W, y(-TUNE_LOCK) - y(TUNE_LOCK));
+    g.font = '700 11px Nunito, sans-serif';
+    for (let s2 = -RANGE; s2 <= RANGE; s2++) {
+      g.fillStyle = s2 === 0 ? 'rgba(255,210,63,0.9)' : 'rgba(255,255,255,0.08)';
+      g.fillRect(0, y(s2), W, s2 === 0 ? 2 : 1);
+      if (s2) {
+        g.fillStyle = 'rgba(255,255,255,0.35)';
+        g.fillText(midiName(tune.target + s2), 6, y(s2) + 4);
+      }
+    }
+    g.fillStyle = '#ffd23f';
+    g.fillText(midiName(tune.target) + ' 🎯', 6, y(0) - 6);
+
+    // your voice
+    const X = (t) => W - 40 - ((now - t) / 6000) * (W - 80);
+    g.save();
+    g.lineWidth = 4;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.shadowBlur = 10;
+    let pen = false;
+    g.beginPath();
+    for (const p of tune.trail) {
+      if (p.d == null) { pen = false; continue; }
+      if (pen) g.lineTo(X(p.t), y(p.d)); else g.moveTo(X(p.t), y(p.d));
+      pen = true;
+    }
+    const locked = diff != null && Math.abs(diff) < TUNE_LOCK;
+    g.strokeStyle = locked ? '#4dff91' : '#ffffff';
+    g.shadowColor = g.strokeStyle;
+    g.stroke();
+    if (diff != null) {
+      g.beginPath();
+      g.fillStyle = g.strokeStyle;
+      g.arc(W - 40, y(diff), 9, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+
+    // hold meter along the bottom
+    g.fillStyle = 'rgba(255,255,255,0.1)';
+    g.fillRect(0, H - 6, W, 6);
+    g.fillStyle = '#4dff91';
+    g.fillRect(0, H - 6, (W * tune.hold) / TUNE_HOLD, 6);
+
+    const st = $('#tu-status');
+    if (!mic.on) return;
+    if (now < tune.cool) return;
+    if (diff == null) {
+      tune.hold = Math.max(0, tune.hold - dt * 0.5);
+      st.textContent = '🎤 Sing ' + midiName(tune.target);
+      return;
+    }
+    const cents = Math.round(diff * 100);
+    if (locked) {
+      tune.hold += dt;
+      st.textContent = `🔒 Locked in! Hold it... (${cents > 0 ? '+' : ''}${cents}¢)`;
+    } else {
+      tune.hold = Math.max(0, tune.hold - dt);
+      const far = Math.abs(diff) > 1 ? ' a lot' : ' a little';
+      st.textContent = diff < 0 ? `⬆ Go higher${far} (${cents}¢)` : `⬇ Go lower${far} (+${cents}¢)`;
+    }
+    if (tune.hold >= TUNE_HOLD) {
+      tune.hold = 0;
+      tune.locks++;
+      $('#tu-locks').textContent = tune.locks;
+      if (tune.locks >= 10) award('tune');
+      eng.sfx('ding');
+      const r = cv.getBoundingClientRect();
+      confetti.burst(r.right - 40, r.top + y(diff), 30);
+      tune.cool = now + 700;
+      if (tune.climb) {
+        tune.climbPos = (tune.climbPos + 1) % 15;
+        if (tune.climbPos === 0) {
+          st.textContent = '🪜 You climbed the whole scale! AWOOO!';
+          eng.sfx('fanfare');
+        } else {
+          st.textContent = pick(['🎯 Nice!', '✨ Got it!', '🐺 Awoo!']) + ' Next: ' + midiName(climbNote(tune.climbPos));
+        }
+        setTimeout(() => setTuneTarget(climbNote(tune.climbPos), true), 700);
+      } else {
+        st.textContent = pick(['🎯 Nailed it! Try another key.', '✨ Perfectly in tune!', '🐺 AWOOO! Locked!']);
+      }
+    }
+  }
+
+  $('#tu-play').addEventListener('click', () => refTone(tune.target, 1.4));
+  $('#tu-up').addEventListener('click', () => setTuneTarget(tune.target + 1, true));
+  $('#tu-down').addEventListener('click', () => setTuneTarget(tune.target - 1, true));
+  $('#tu-drone').addEventListener('click', () => toggleDrone(!tune.stopDrone));
+  $('#tu-climb').addEventListener('click', () => {
+    tune.climb = !tune.climb;
+    $('#tu-climb').setAttribute('aria-pressed', String(tune.climb));
+    if (tune.climb) {
+      tune.climbRoot = tune.target;
+      tune.climbPos = 0;
+      toast(`🪜 Scale climb from ${midiName(tune.target)}: lock each note to move up.`, true);
+      setTuneTarget(tune.target, true);
+    }
+  });
+  setTuneTarget(settings.rangeLow != null ? Math.round((settings.rangeLow + settings.rangeHigh) / 2) - 3 : 60, false);
+
+  // ------------------------------------------------------------------
   // Main loop
   // ------------------------------------------------------------------
 
@@ -1563,6 +1845,21 @@
     $('#btn-rec').setAttribute('aria-pressed', String(settings.record));
     toast(settings.record ? (mic.on ? '⏺ Your next take will be recorded.' : '⏺ Recording on. Turn on the mic too!') : '⏺ Recording off', true);
   });
+  $('#btn-listen').addEventListener('click', () => cur && setListen(!cur.listen));
+  $('#btn-hear').addEventListener('click', () => {
+    if (!cur) return;
+    if (cur.listen) setListen(false);
+    previewLine(cur.song.lines[lineIndexAt(beatNow())]);
+  });
+  function setVoiceGuide(on) {
+    settings.voiceGuide = on;
+    saveSettings();
+    const b = $('#btn-voice');
+    b.textContent = on ? '🗣️ Singer' : '🎹 Synth';
+    b.title = on ? 'Guide melody is sung by a voice. Tap for a synth instead.' : 'Guide melody is a synth. Tap for a singing voice.';
+  }
+  $('#btn-voice').addEventListener('click', () => setVoiceGuide(!settings.voiceGuide));
+  setVoiceGuide(settings.voiceGuide);
   $('#btn-sheet').addEventListener('click', () => { $('#sheet').hidden = !$('#sheet').hidden; });
   $('#sheet-close').addEventListener('click', () => { $('#sheet').hidden = true; });
 
@@ -1744,5 +2041,5 @@
   renderHome();
 
   // Exposed for tests and curious wolves.
-  window.KaraokeWolf = { LIB, buildSong, parseTokens, noteToMidi, state: () => cur, beatNow };
+  window.KaraokeWolf = { LIB, buildSong, parseTokens, noteToMidi, state: () => cur, beatNow, tune };
 })();

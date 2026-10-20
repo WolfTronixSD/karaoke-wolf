@@ -16,15 +16,17 @@ It runs entirely in your browser: no server, no account, no install.
 
 **Learning**
 - **Coach Wolf** comments live ("a little flat, like a pancake 🥞") and gives tips at the end: whether you sing flat or sharp, how you did on long, high and low notes, and which line to practise.
+- **👂 Listen** plays the whole song sung for you (no scoring), and **🔊 Hear line** sings just the current line, so you can learn the tune before you try. The guide melody uses a synthesized **Singer** voice by default; tap 🗣️/🎹 to switch to a plain synth.
 - **Loop line** + **tempo** slider (50–130%) to drill the hard bits. Tap any line in the lyric sheet to jump there.
 - **Key** buttons move a song into your range. The guide melody and band volumes are adjustable.
 - **Record** your take and listen back (or download it).
+- **Tune Mode** (Voice Lab): pick any note on the keyboard, hear it, then slide your voice onto the target line and hold it in the green band. Has a drone for constant reference and a scale-climb drill.
 - **Voice Lab**: a tuner, a range finder (with a just-for-fun voice type), and **Match the Note**, an ear-training game.
 - Settings for difficulty, octave forgiveness, headphones mode and an "Echo Wolf" reverb on your voice.
 
 **Bells & whistles**
 - Soundboard: howl, air horn, applause, ba-dum-tss, boing, crowd "ooh" (keys 1–6)
-- Disco lights, confetti, emoji floaties, 18 badges to unlock, personal bests
+- Disco lights, confetti, emoji floaties, 19 badges to unlock, personal bests
 
 ## Songs
 
