@@ -20,8 +20,13 @@
 
   <header class="topbar">
     <button class="logo" data-go="home" aria-label="Karaoke Wolf home">
-      <span class="logo-wolf">🐺</span><span class="logo-text">Karaoke<b>Wolf</b></span>
+      <span class="logo-wolf">🐺</span>
+      <span class="logo-stack">
+        <span class="logo-text">Karaoke<b>Wolf</b></span>
+        <span class="version" id="version">v1.2</span>
+      </span>
     </button>
+    <div class="clock" id="clock" aria-label="Current date and time"><b id="clock-time">--:--</b><small id="clock-date"></small></div>
     <nav>
       <button class="nav-btn" data-go="home">🎵 <span>Songs</span></button>
       <button class="nav-btn" data-go="lab">🧪 <span>Voice Lab</span></button>
@@ -267,6 +272,7 @@
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <div id="floaties" class="floaties" aria-hidden="true"></div>
 
+  <script src="js/version.js"></script>
   <script src="js/songs.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/pitch.js"></script>

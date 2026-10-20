@@ -2038,6 +2038,28 @@
 
   document.addEventListener('visibilitychange', () => { if (document.hidden && P.playing) pause(); });
 
+  // Version + build time and a live clock in the header
+  (function versionAndClock() {
+    const V = window.KW_VERSION || { version: '1', build: 'dev' };
+    const built = V.builtAt ? new Date(V.builtAt) : null;
+    const fmtBuilt = built
+      ? built.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'local build';
+    const label = `v${V.version}.${V.build}`;
+    const el = $('#version');
+    el.textContent = `${label} · ${fmtBuilt}`;
+    el.title = `Karaoke Wolf ${label}${V.commit ? ' (' + V.commit + ')' : ''}, built ${fmtBuilt}`;
+    const tEl = $('#clock-time');
+    const dEl = $('#clock-date');
+    function tick() {
+      const now = new Date();
+      tEl.textContent = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      dEl.textContent = now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    tick();
+    setInterval(tick, 1000);
+  })();
+
   renderHome();
 
   // Exposed for tests and curious wolves.

@@ -23,6 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Stamp version and build time
+        run: |
+          sed -i "s|build: 'dev'|build: '${{ github.run_number }}'|; s|builtAt: null|builtAt: '$(date -u +%Y-%m-%dT%H:%M:%SZ)'|; s|commit: ''|commit: '${GITHUB_SHA::7}'|" js/version.js
+          sed -i "s|js/version.js\"|js/version.js?b=${{ github.run_number }}\"|" index.html
+          cat js/version.js
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
