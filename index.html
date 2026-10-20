@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Karaoke Wolf</title>
+  <meta name="description" content="Pick a song, follow the lyrics and pitch lane, and learn to sing with live feedback.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐺</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="disco" aria-hidden="true">
+    <span class="beam b1"></span><span class="beam b2"></span><span class="beam b3"></span><span class="beam b4"></span>
+    <div class="ball-light"></div>
+  </div>
+  <canvas id="confetti" aria-hidden="true"></canvas>
+
+  <header class="topbar">
+    <button class="logo" data-go="home" aria-label="Karaoke Wolf home">
+      <span class="logo-wolf">🐺</span><span class="logo-text">Karaoke<b>Wolf</b></span>
+    </button>
+    <nav>
+      <button class="nav-btn" data-go="home">🎵 <span>Songs</span></button>
+      <button class="nav-btn" data-go="lab">🧪 <span>Voice Lab</span></button>
+      <button class="nav-btn" data-go="badges">🏅 <span>Badges</span></button>
+      <button class="nav-btn icon" id="btn-settings" aria-label="Settings">⚙️</button>
+      <button class="mic-btn" id="btn-mic" aria-pressed="false">
+        <span class="mic-icon">🎤</span><span class="mic-label">Mic off</span>
+        <span class="mic-meter"><i></i></span>
+      </button>
+    </nav>
+  </header>
+
+  <!-- HOME -->
+  <main id="screen-home" class="screen active">
+    <section class="hero">
+      <div class="hero-wolf" aria-hidden="true">🐺<span class="hero-note n1">♪</span><span class="hero-note n2">♫</span><span class="hero-note n3">♪</span></div>
+      <div>
+        <h1>Sing like nobody's<br><span class="glow">howling</span>.</h1>
+        <p>Pick a song, turn on your mic, and follow the glowing notes. Karaoke Wolf shows you where your voice is, tells you when to go higher or lower, and scores every note.</p>
+        <div class="hero-actions">
+          <button class="btn big primary" id="btn-quick">🎲 Surprise me</button>
+          <button class="btn big" data-song="warmup">🏋️ Warm up first</button>
+        </div>
+      </div>
+    </section>
+    <div class="chips" role="tablist">
+      <button class="chip active" data-cat="all">All songs</button>
+      <button class="chip" data-cat="classics">Classics</button>
+      <button class="chip" data-cat="originals">Wolf Originals</button>
+      <button class="chip" data-cat="warmups">Warm-ups</button>
+    </div>
+    <section id="song-grid" class="song-grid"></section>
+    <footer class="foot">Songs are public domain or Karaoke Wolf originals. Tip: wear headphones for the most accurate scoring.</footer>
+  </main>
+
+  <!-- STAGE -->
+  <main id="screen-stage" class="screen">
+    <div class="stage-head">
+      <button class="btn ghost" id="btn-back">← Songs</button>
+      <div class="stage-title"><span id="st-emoji">🎵</span> <span id="st-title">Song</span></div>
+      <div class="scoreboard">
+        <div class="stat"><small>Score</small><b id="st-score">0</b></div>
+        <div class="stat"><small>Combo</small><b id="st-combo">0</b></div>
+        <div class="stat hype"><small>Hype</small><div class="hype-bar"><i id="st-hype"></i></div></div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="lane-wrap">
+        <canvas id="lane"></canvas>
+        <div id="countin" class="countin"></div>
+        <div id="judge" class="judge"></div>
+        <div id="hype-banner" class="hype-banner">🔥 HYPE MODE ×2 🔥</div>
+      </div>
+
+      <div class="lyrics" id="lyrics">
+        <div class="ball" id="ball">🐺</div>
+        <div class="countdown" id="countdown"><i></i><i></i><i></i></div>
+        <div class="lyric-line cur" id="lyric-cur"></div>
+        <div class="lyric-line next" id="lyric-next"></div>
+      </div>
+
+      <div class="mc" id="mc">
+        <div class="mc-avatar">🐺</div>
+        <div class="mc-bubble" id="mc-text">Ready when you are!</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="transport">
+        <button class="btn round primary" id="btn-play" aria-label="Play">▶</button>
+        <button class="btn round" id="btn-restart" aria-label="Restart">⟲</button>
+        <button class="btn" id="btn-loop" aria-pressed="false">🔁 Loop line</button>
+        <button class="btn" id="btn-rec" aria-pressed="false">⏺ Record</button>
+        <button class="btn" id="btn-sheet">📜 Lyrics</button>
+      </div>
+      <div class="knobs">
+        <label>Tempo <output id="out-tempo">100%</output>
+          <input type="range" id="in-tempo" min="50" max="130" step="5" value="100">
+        </label>
+        <div class="keyctl">Key
+          <button class="btn mini" id="key-down" aria-label="Key down">−</button>
+          <output id="out-key">0</output>
+          <button class="btn mini" id="key-up" aria-label="Key up">+</button>
+        </div>
+        <label>Guide melody
+          <input type="range" id="in-guide" min="0" max="1" step="0.05">
+        </label>
+        <label>Band
+          <input type="range" id="in-band" min="0" max="1" step="0.05">
+        </label>
+      </div>
+      <div class="soundboard">
+        <button class="sfx" data-sfx="howl" title="Howl (1)">🐺<span>Howl</span></button>
+        <button class="sfx" data-sfx="airhorn" title="Air horn (2)">📯<span>Horn</span></button>
+        <button class="sfx" data-sfx="applause" title="Applause (3)">👏<span>Clap</span></button>
+        <button class="sfx" data-sfx="rimshot" title="Ba-dum-tss (4)">🥁<span>Tss</span></button>
+        <button class="sfx" data-sfx="boing" title="Boing (5)">🌀<span>Boing</span></button>
+        <button class="sfx" data-sfx="ooh" title="Crowd ooh (6)">😮<span>Ooh</span></button>
+        <button class="sfx" id="btn-disco" title="Disco lights (D)">🪩<span>Disco</span></button>
+      </div>
+    </div>
+
+    <aside class="sheet" id="sheet" hidden>
+      <div class="sheet-head"><b>Lyric sheet</b><small>Tap a line to practise from there</small><button class="btn mini" id="sheet-close">✕</button></div>
+      <ol id="sheet-lines"></ol>
+    </aside>
+  </main>
+
+  <!-- VOICE LAB -->
+  <main id="screen-lab" class="screen">
+    <h2 class="page-title">🧪 Voice Lab</h2>
+    <p class="page-sub">Find your range, tune your voice, and train your ears. Turn the mic on to begin.</p>
+    <div class="lab-grid">
+      <section class="card tuner">
+        <h3>Tuner</h3>
+        <div class="tuner-note" id="tn-note">—</div>
+        <div class="tuner-hz" id="tn-hz">Sing a note</div>
+        <div class="tuner-meter">
+          <span class="flat">flat</span>
+          <div class="tuner-scale"><i class="center"></i><i class="needle" id="tn-needle"></i></div>
+          <span class="sharp">sharp</span>
+        </div>
+        <div class="piano" id="tn-piano"></div>
+      </section>
+
+      <section class="card range">
+        <h3>Range finder</h3>
+        <p>Slide from your lowest comfortable note to your highest. Hold each note for a moment.</p>
+        <div class="range-readout">
+          <div><small>Lowest</small><b id="rg-low">—</b></div>
+          <div><small>Highest</small><b id="rg-high">—</b></div>
+          <div><small>Span</small><b id="rg-span">—</b></div>
+        </div>
+        <div class="range-type" id="rg-type">Voice type: sing to find out</div>
+        <div class="row">
+          <button class="btn" id="rg-reset">Reset</button>
+          <button class="btn primary" id="rg-save">Use my range for songs</button>
+        </div>
+        <p class="hint" id="rg-saved"></p>
+      </section>
+
+      <section class="card match">
+        <h3>Match the Note 🎯</h3>
+        <p>Listen to the note, then sing it back and hold it until the ring fills up.</p>
+        <div class="match-ring" id="mt-ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="track"/><circle cx="60" cy="60" r="52" class="fill" id="mt-fill"/></svg><span id="mt-target">?</span></div>
+        <div class="match-stats"><span>Points <b id="mt-points">0</b></span><span>Streak <b id="mt-streak">0</b></span><span>Best <b id="mt-best">0</b></span></div>
+        <div class="match-hint" id="mt-hint">Press start!</div>
+        <div class="row">
+          <button class="btn primary" id="mt-start">▶ Start</button>
+          <button class="btn" id="mt-again">🔊 Hear again</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- BADGES -->
+  <main id="screen-badges" class="screen">
+    <h2 class="page-title">🏅 Badges</h2>
+    <p class="page-sub" id="badge-count"></p>
+    <div class="badge-grid" id="badge-grid"></div>
+  </main>
+
+  <!-- RESULTS -->
+  <div class="modal" id="results" hidden>
+    <div class="modal-card results-card">
+      <div class="grade" id="rs-grade">A</div>
+      <div class="grade-title" id="rs-title">Pack Leader</div>
+      <div class="rs-quip" id="rs-quip"></div>
+      <div class="rs-new" id="rs-new" hidden>🎉 New personal best!</div>
+      <div class="rs-stats">
+        <div><small>Score</small><b id="rs-score">0</b></div>
+        <div><small>Accuracy</small><b id="rs-acc">0%</b></div>
+        <div><small>Best combo</small><b id="rs-combo">0</b></div>
+      </div>
+      <div class="rs-notes" id="rs-notes"></div>
+      <h4>How each line went</h4>
+      <div class="rs-lines" id="rs-lines"></div>
+      <h4>Coach Wolf's tips</h4>
+      <ul class="rs-tips" id="rs-tips"></ul>
+      <div class="rs-rec" id="rs-rec" hidden>
+        <h4>Your recording</h4>
+        <audio id="rs-audio" controls></audio>
+        <a class="btn mini" id="rs-download" download="karaoke-wolf-take.webm">⬇ Download</a>
+      </div>
+      <div class="row wrap">
+        <button class="btn primary" id="rs-again">🔁 Sing again</button>
+        <button class="btn" id="rs-practice">🎯 Practise weakest line</button>
+        <button class="btn" id="rs-share">📋 Copy brag</button>
+        <button class="btn ghost" id="rs-home">Songs</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="modal" id="settings" hidden>
+    <div class="modal-card">
+      <h3>⚙️ Settings</h3>
+      <label class="set-row">Difficulty
+        <select id="set-diff">
+          <option value="easy">Easy (forgiving)</option>
+          <option value="normal">Normal</option>
+          <option value="pro">Pro (strict)</option>
+        </select>
+      </label>
+      <label class="set-row"><span>Octave forgiveness<small>Any octave counts. Great for deep or high voices.</small></span><input type="checkbox" id="set-octave"></label>
+      <label class="set-row"><span>Headphones mode<small>Turns off echo cancelling for cleaner pitch. Only with headphones.</small></span><input type="checkbox" id="set-headphones"></label>
+      <label class="set-row"><span>Echo Wolf<small>Hear your own voice with echo. Headphones only, or it will squeal!</small></span><input type="checkbox" id="set-echo"></label>
+      <label class="set-row"><span>Hit sounds<small>A little ding on perfect notes.</small></span><input type="checkbox" id="set-ding"></label>
+      <label class="set-row"><span>Disco lights</span><input type="checkbox" id="set-disco"></label>
+      <div class="row wrap">
+        <button class="btn ghost danger" id="set-reset">Reset scores &amp; badges</button>
+        <button class="btn primary" id="set-close">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="floaties" class="floaties" aria-hidden="true"></div>
+
+  <script src="js/songs.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/pitch.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
