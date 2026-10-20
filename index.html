@@ -75,6 +75,7 @@
         <div id="countin" class="countin"></div>
         <div id="judge" class="judge"></div>
         <div id="hype-banner" class="hype-banner">🔥 HYPE MODE ×2 🔥</div>
+        <div class="listen-banner">👂 Listen mode: no scoring, just learn the tune</div>
       </div>
 
       <div class="lyrics" id="lyrics">
@@ -94,6 +95,8 @@
       <div class="transport">
         <button class="btn round primary" id="btn-play" aria-label="Play">▶</button>
         <button class="btn round" id="btn-restart" aria-label="Restart">⟲</button>
+        <button class="btn" id="btn-listen" aria-pressed="false" title="Hear the whole song sung for you first">👂 Listen</button>
+        <button class="btn" id="btn-hear" title="Hear the current line sung, then sing it back">🔊 Hear line</button>
         <button class="btn" id="btn-loop" aria-pressed="false">🔁 Loop line</button>
         <button class="btn" id="btn-rec" aria-pressed="false">⏺ Record</button>
         <button class="btn" id="btn-sheet">📜 Lyrics</button>
@@ -107,9 +110,12 @@
           <output id="out-key">0</output>
           <button class="btn mini" id="key-up" aria-label="Key up">+</button>
         </div>
-        <label>Guide melody
-          <input type="range" id="in-guide" min="0" max="1" step="0.05">
-        </label>
+        <div class="guidectl">
+          <label>Guide melody
+            <input type="range" id="in-guide" min="0" max="1" step="0.05">
+          </label>
+          <button class="btn mini" id="btn-voice">🗣️ Singer</button>
+        </div>
         <label>Band
           <input type="range" id="in-band" min="0" max="1" step="0.05">
         </label>
@@ -125,16 +131,35 @@
       </div>
     </div>
 
-    <aside class="sheet" id="sheet" hidden>
+  </main>
+
+  <aside class="sheet" id="sheet" hidden>
       <div class="sheet-head"><b>Lyric sheet</b><small>Tap a line to practise from there</small><button class="btn mini" id="sheet-close">✕</button></div>
       <ol id="sheet-lines"></ol>
     </aside>
-  </main>
 
   <!-- VOICE LAB -->
   <main id="screen-lab" class="screen">
     <h2 class="page-title">🧪 Voice Lab</h2>
     <p class="page-sub">Find your range, tune your voice, and train your ears. Turn the mic on to begin.</p>
+    <section class="card tune" id="tune">
+      <h3>🎯 Tune Mode</h3>
+      <p>Pick a note and hear it. Then slide your voice onto the gold line and hold it inside the green band until the bar fills. Turn on the drone to hear the note the whole time, or climb a scale one note at a time.</p>
+      <div class="tune-top">
+        <div class="tune-box"><small>Target</small><b id="tu-target">C4</b></div>
+        <div class="tune-status" id="tu-status">Tap a key to choose a note</div>
+        <div class="tune-box"><small>Locked</small><b id="tu-locks">0</b></div>
+      </div>
+      <canvas id="tu-graph"></canvas>
+      <div class="tune-keys" id="tu-keys"></div>
+      <div class="row wrap">
+        <button class="btn mini" id="tu-down">− Lower</button>
+        <button class="btn primary" id="tu-play">🔊 Hear it</button>
+        <button class="btn" id="tu-drone" aria-pressed="false">🎵 Drone</button>
+        <button class="btn" id="tu-climb" aria-pressed="false">🪜 Scale climb</button>
+        <button class="btn mini" id="tu-up">+ Higher</button>
+      </div>
+    </section>
     <div class="lab-grid">
       <section class="card tuner">
         <h3>Tuner</h3>

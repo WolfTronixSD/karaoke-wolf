@@ -6,6 +6,30 @@
 
   const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
+  // Vowel formants: [frequency, gain, Q] for the first three formants.
+  const VOWELS = {
+    a: [[800, 1, 8], [1150, 0.5, 10], [2900, 0.25, 12]],
+    e: [[450, 1, 8], [1900, 0.45, 12], [2600, 0.25, 12]],
+    i: [[320, 1, 8], [2200, 0.35, 12], [3000, 0.25, 12]],
+    o: [[480, 1, 8], [820, 0.6, 10], [2800, 0.15, 12]],
+    u: [[340, 1, 8], [750, 0.4, 10], [2400, 0.1, 12]],
+    m: [[280, 1, 6], [900, 0.15, 8], [2200, 0.05, 10]],
+  };
+
+  // Guess the sung vowel of a syllable ("moon" -> u, "star" -> a).
+  function vowelOf(text) {
+    const s = String(text || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (!s) return 'a';
+    if (/^(h?m+|hmm+|brr+)$/.test(s)) return /^brr/.test(s) ? 'u' : 'm';
+    if (/oo|ou|ew|ue|u/.test(s.match(/[aeiouy]+/)?.[0] || '')) return 'u';
+    const v = (s.match(/[aeiouy]+/) || ['a'])[0];
+    if (/^(ee|ea|ie|i|y|ey)$/.test(v) || v[0] === 'i') return 'i';
+    if (v[0] === 'e') return 'e';
+    if (v[0] === 'o') return 'o';
+    if (v === 'ay' || v === 'ai') return 'e';
+    return 'a';
+  }
+
   class Engine {
     constructor() {
       this.ctx = null;
@@ -134,6 +158,96 @@
       lp.connect(this.reverb);
       this._track(a, t + dur + 0.2);
       this._track(b, t + dur + 0.2);
+    }
+
+    // A singing voice: a buzzy source shaped by vowel formants, with breath,
+    // a consonant "tick" at the start of each word and natural vibrato.
+    voice(midi, t, dur, vowel = 'a', onset = true, out = this.guideGain) {
+      const ctx = this.ctx;
+      const f = mtof(midi);
+      const F = VOWELS[vowel] || VOWELS.a;
+      const env = ctx.createGain();
+      const peak = 0.5;
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.exponentialRampToValueAtTime(peak, t + 0.06);
+      env.gain.setValueAtTime(peak, Math.max(t + 0.06, t + dur - 0.06));
+      env.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.12);
+
+      const src = this._osc('sawtooth', f, t);
+      const src2 = this._osc('triangle', f, t);
+      src2.detune.value = 4;
+      // slide into the note a little, like a real singer
+      if (onset) src.frequency.setValueAtTime(f * 0.97, t);
+      src.frequency.exponentialRampToValueAtTime(f, t + 0.07);
+      const lfo = this._osc('sine', 5.2, t);
+      const depth = ctx.createGain();
+      depth.gain.setValueAtTime(0, t);
+      depth.gain.linearRampToValueAtTime(dur > 0.5 ? f * 0.014 : f * 0.004, t + Math.min(0.6, dur));
+      lfo.connect(depth);
+      depth.connect(src.frequency);
+      depth.connect(src2.frequency);
+
+      const tilt = ctx.createBiquadFilter();
+      tilt.type = 'lowpass';
+      tilt.frequency.value = vowel === 'm' ? 700 : 3800;
+      const pre = ctx.createGain();
+      pre.gain.value = 0.6;
+      src.connect(pre);
+      src2.connect(pre);
+      pre.connect(tilt);
+      const mix = ctx.createGain();
+      mix.gain.value = 1;
+      F.forEach(([freq, gain, q]) => {
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = freq;
+        bp.Q.value = q;
+        const g = ctx.createGain();
+        g.gain.value = gain;
+        tilt.connect(bp).connect(g).connect(mix);
+      });
+      mix.connect(env);
+      // a little breath noise through the same envelope
+      const breath = ctx.createBufferSource();
+      breath.buffer = this.noise;
+      breath._startAt = t;
+      const bf = ctx.createBiquadFilter();
+      bf.type = 'bandpass';
+      bf.frequency.value = F[1][0];
+      bf.Q.value = 1;
+      const bg = ctx.createGain();
+      bg.gain.value = 0.05;
+      breath.connect(bf).connect(bg).connect(env);
+      env.connect(out);
+      env.connect(this.reverb);
+      if (onset) {
+        // consonant tick
+        this._noise(t, 0.035, 'highpass', 3500, 0.12, out);
+      }
+      const end = t + dur + 0.2;
+      this._track(src, end);
+      this._track(src2, end);
+      this._track(lfo, end);
+      this._track(breath, end);
+      return [src, src2, lfo, breath];
+    }
+
+    // A steady reference tone you can hold against. Returns a stop() function.
+    drone(midi, vowel = 'a') {
+      this.ensure();
+      const ctx = this.ctx;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, this.now);
+      g.gain.exponentialRampToValueAtTime(0.5, this.now + 0.3);
+      g.connect(this.sfxGain);
+      const holder = ctx.createGain();
+      holder.connect(g);
+      // reuse the voice for one long note
+      const nodes = this.voice(midi, this.now + 0.02, 600, vowel, false, holder);
+      return () => {
+        g.gain.setTargetAtTime(0.0001, this.now, 0.08);
+        nodes.forEach((n) => { try { n.stop(this.now + 0.4); } catch (e) { /* already stopped */ } });
+      };
     }
 
     bass(midi, t, dur) {
@@ -361,5 +475,5 @@
     }
   }
 
-  window.KWAudio = { Engine, mtof };
+  window.KWAudio = { Engine, mtof, vowelOf };
 })();

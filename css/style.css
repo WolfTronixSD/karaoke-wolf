@@ -320,3 +320,35 @@ select { background: #0006; color: var(--text); border: 1px solid var(--line); b
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- listen mode, singer toggle, line preview ---------- */
+.listen-banner { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: none; font-weight: 900; font-size: 14px; white-space: nowrap;
+  padding: 6px 14px; border-radius: 999px; background: #3ee8ff33; border: 1px solid var(--cyan); color: var(--cyan); }
+body.listening .listen-banner { display: block; }
+#btn-listen[aria-pressed="true"] { background: linear-gradient(135deg, #0e5a7a, #13506b); border-color: var(--cyan); }
+.guidectl { display: flex; align-items: flex-end; gap: 6px; }
+.sheet li { display: flex; align-items: center; gap: 8px; }
+.sheet li .acc { margin-left: auto; }
+.sheet .hear { flex: none; border: 1px solid var(--line); background: var(--panel-strong); border-radius: 8px; padding: 2px 6px; font-size: 14px; }
+.sheet .hear:hover { background: var(--cyan); }
+
+/* ---------- tune mode ---------- */
+.tune { margin-bottom: 16px; }
+.tune-top { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin: 6px 0 10px; }
+.tune-box { background: #0004; border-radius: 12px; padding: 6px 14px; text-align: center; min-width: 80px; }
+.tune-box small { display: block; color: var(--muted); font-size: 12px; }
+.tune-box b { font-family: var(--display); font-weight: 400; font-size: 26px; }
+.tune-status { text-align: center; font-weight: 900; font-size: 18px; }
+#tu-graph { width: 100%; height: 180px; display: block; border-radius: 12px; background: #05021299; border: 1px solid var(--line); }
+.tune-keys { position: relative; height: 90px; margin-top: 12px; user-select: none; }
+.tune-keys .wk, .tune-keys .bk { position: absolute; top: 0; padding: 0; border-radius: 0 0 6px 6px; }
+.tune-keys .wk { height: 100%; background: #f2f0f8; border: 1px solid #8884; color: #555; }
+.tune-keys .wk b { position: absolute; bottom: 4px; left: 0; right: 0; font-size: 9px; font-weight: 900; text-align: center; }
+.tune-keys .bk { height: 58%; background: #1d1830; border: 1px solid #000; z-index: 1; }
+.tune-keys .on { background: var(--pink) !important; box-shadow: inset 0 0 14px #fff8; color: #fff; }
+.tune .row { justify-content: center; }
+@media (max-width: 720px) {
+  .tune-top { grid-template-columns: 1fr 1fr; }
+  .tune-status { grid-column: 1 / -1; grid-row: 2; }
+  .tune-keys .wk b { font-size: 7px; }
+}
