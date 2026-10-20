@@ -30,6 +30,7 @@
     <nav>
       <button class="nav-btn" data-go="home">🎵 <span>Songs</span></button>
       <button class="nav-btn" data-go="lab">🧪 <span>Voice Lab</span></button>
+      <button class="nav-btn" data-go="takes">🎧 <span>Takes</span></button>
       <button class="nav-btn" data-go="badges">🏅 <span>Badges</span></button>
       <button class="nav-btn icon" id="btn-settings" aria-label="Settings">⚙️</button>
       <button class="mic-btn" id="btn-mic" aria-pressed="false">
@@ -56,6 +57,7 @@
       <button class="chip active" data-cat="all">All songs</button>
       <button class="chip" data-cat="classics">Classics</button>
       <button class="chip" data-cat="originals">Wolf Originals</button>
+      <button class="chip" data-cat="rock">🎸 Rock</button>
       <button class="chip" data-cat="warmups">Warm-ups</button>
     </div>
     <section id="song-grid" class="song-grid"></section>
@@ -80,6 +82,7 @@
         <div id="countin" class="countin"></div>
         <div id="judge" class="judge"></div>
         <div id="hype-banner" class="hype-banner">🔥 HYPE MODE ×2 🔥</div>
+        <div class="rec-badge" title="Recording your voice + the music">● REC</div>
         <div class="listen-banner">👂 Listen mode: no scoring, just learn the tune</div>
       </div>
 
@@ -119,7 +122,14 @@
           <label>Guide melody
             <input type="range" id="in-guide" min="0" max="1" step="0.05">
           </label>
-          <button class="btn mini" id="btn-voice">🗣️ Singer</button>
+          <label>Singer
+            <select id="sel-singer">
+              <option value="wolfie">🐺 Wolfie (warm)</option>
+              <option value="aria">✨ Aria (bright, clear)</option>
+              <option value="rocco">🎸 Rocco (deep rock)</option>
+              <option value="synth">🎹 Synth (plain tone)</option>
+            </select>
+          </label>
         </div>
         <label>Band
           <input type="range" id="in-band" min="0" max="1" step="0.05">
@@ -208,6 +218,14 @@
     </div>
   </main>
 
+  <!-- TAKES -->
+  <main id="screen-takes" class="screen">
+    <h2 class="page-title">🎧 My Takes</h2>
+    <p class="page-sub">Every recording you make is saved here on this device. Turn on ⏺ Record on the song screen, press ▶ and sing: your voice and the music are recorded together. When you stop, finish the song, restart or go back, the take lands here.</p>
+    <p class="page-sub" id="takes-empty">No takes yet. Pick a song, tap ⏺ Record, then ▶ and sing!</p>
+    <div class="takes-list" id="takes-list"></div>
+  </main>
+
   <!-- BADGES -->
   <main id="screen-badges" class="screen">
     <h2 class="page-title">🏅 Badges</h2>
@@ -241,6 +259,7 @@
         <button class="btn primary" id="rs-again">🔁 Sing again</button>
         <button class="btn" id="rs-practice">🎯 Practise weakest line</button>
         <button class="btn" id="rs-share">📋 Copy brag</button>
+        <button class="btn" id="rs-takes">🎧 All takes</button>
         <button class="btn ghost" id="rs-home">Songs</button>
       </div>
     </div>

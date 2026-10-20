@@ -16,6 +16,18 @@
     m: [[280, 1, 6], [900, 0.15, 8], [2200, 0.05, 10]],
   };
 
+  // Singer profiles. formant scales the vowel formants (smaller = bigger,
+  // deeper vocal tract), ring adds the "singer's formant" that makes voices
+  // cut through, octave shifts where the singer sings.
+  const SINGERS = {
+    wolfie: { label: 'Wolfie', octave: 0, formant: 1, ring: null, tilt: 1.1, chorus: 5, scoop: 0.97, vibRate: 5.2, vibDepth: 0.014,
+      bright: 3800, dry: 0.08, presence: 2, breath: 0.05, attack: 0.06, level: 0.5, grit: 0 },
+    aria: { label: 'Aria', octave: 0, formant: 1.14, ring: [3300, 0.35, 6], tilt: 1.35, chorus: 2, scoop: 0.985, vibRate: 5.8, vibDepth: 0.011,
+      bright: 6000, dry: 0.05, presence: 5, breath: 0.02, attack: 0.04, level: 0.55, grit: 0 },
+    rocco: { label: 'Rocco', octave: -12, formant: 0.86, ring: [2700, 0.4, 5], tilt: 0.95, chorus: 4, scoop: 0.95, vibRate: 4.8, vibDepth: 0.012,
+      bright: 4500, dry: 0.1, presence: 4, breath: 0.03, attack: 0.05, level: 0.55, grit: 1.8 },
+  };
+
   // Guess the sung vowel of a syllable ("moon" -> u, "star" -> a).
   function vowelOf(text) {
     const s = String(text || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -160,43 +172,63 @@
       this._track(b, t + dur + 0.2);
     }
 
-    // A singing voice: a buzzy source shaped by vowel formants, with breath,
-    // a consonant "tick" at the start of each word and natural vibrato.
-    voice(midi, t, dur, vowel = 'a', onset = true, out = this.guideGain) {
+    // A singing voice: a glottal-pulse source shaped by vowel formants, with
+    // breath, a consonant "tick" at the start of each word and natural vibrato.
+    // `singer` picks one of the SINGERS profiles below.
+    voice(midi, t, dur, vowel = 'a', onset = true, out = this.guideGain, singer = 'wolfie') {
       const ctx = this.ctx;
-      const f = mtof(midi);
-      const F = VOWELS[vowel] || VOWELS.a;
+      const S = SINGERS[singer] || SINGERS.wolfie;
+      const f = mtof(midi + S.octave);
+      const F = (VOWELS[vowel] || VOWELS.a).map(([fr, g, q]) => [fr * S.formant, g, q]);
+      if (S.ring) F.push(S.ring);
       const env = ctx.createGain();
-      const peak = 0.5;
+      const peak = S.level;
       env.gain.setValueAtTime(0.0001, t);
-      env.gain.exponentialRampToValueAtTime(peak, t + 0.06);
-      env.gain.setValueAtTime(peak, Math.max(t + 0.06, t + dur - 0.06));
+      env.gain.exponentialRampToValueAtTime(peak, t + S.attack);
+      env.gain.setValueAtTime(peak, Math.max(t + S.attack, t + dur - 0.06));
       env.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.12);
 
-      const src = this._osc('sawtooth', f, t);
-      const src2 = this._osc('triangle', f, t);
-      src2.detune.value = 4;
+      const wave = this._glottal(S.tilt);
+      const src = this._osc('sine', f, t);
+      src.setPeriodicWave(wave);
+      const src2 = this._osc('sine', f, t);
+      src2.setPeriodicWave(wave);
+      src2.detune.value = S.chorus;
       // slide into the note a little, like a real singer
-      if (onset) src.frequency.setValueAtTime(f * 0.97, t);
-      src.frequency.exponentialRampToValueAtTime(f, t + 0.07);
-      const lfo = this._osc('sine', 5.2, t);
+      if (onset) {
+        src.frequency.setValueAtTime(f * S.scoop, t);
+        src2.frequency.setValueAtTime(f * S.scoop, t);
+      }
+      src.frequency.exponentialRampToValueAtTime(f, t + 0.08);
+      src2.frequency.exponentialRampToValueAtTime(f, t + 0.08);
+      const lfo = this._osc('sine', S.vibRate, t);
       const depth = ctx.createGain();
       depth.gain.setValueAtTime(0, t);
-      depth.gain.linearRampToValueAtTime(dur > 0.5 ? f * 0.014 : f * 0.004, t + Math.min(0.6, dur));
+      depth.gain.setValueAtTime(0, t + Math.min(0.25, dur * 0.4));
+      depth.gain.linearRampToValueAtTime(dur > 0.5 ? f * S.vibDepth : f * S.vibDepth * 0.3, t + Math.min(0.7, dur));
       lfo.connect(depth);
       depth.connect(src.frequency);
       depth.connect(src2.frequency);
 
-      const tilt = ctx.createBiquadFilter();
-      tilt.type = 'lowpass';
-      tilt.frequency.value = vowel === 'm' ? 700 : 3800;
       const pre = ctx.createGain();
-      pre.gain.value = 0.6;
+      pre.gain.value = 0.5;
       src.connect(pre);
       src2.connect(pre);
-      pre.connect(tilt);
+      let feed = pre;
+      if (S.grit) {
+        const ws = ctx.createWaveShaper();
+        ws.curve = this._curve(S.grit);
+        feed = pre.connect(ws);
+      }
+      const tilt = ctx.createBiquadFilter();
+      tilt.type = 'lowpass';
+      tilt.frequency.value = vowel === 'm' ? 900 : S.bright;
+      feed.connect(tilt);
       const mix = ctx.createGain();
-      mix.gain.value = 1;
+      // a little of the dry source keeps consonants and edges crisp
+      const dry = ctx.createGain();
+      dry.gain.value = S.dry;
+      tilt.connect(dry).connect(mix);
       F.forEach(([freq, gain, q]) => {
         const bp = ctx.createBiquadFilter();
         bp.type = 'bandpass';
@@ -206,7 +238,13 @@
         g.gain.value = gain;
         tilt.connect(bp).connect(g).connect(mix);
       });
-      mix.connect(env);
+      // presence boost for clarity
+      const pres = ctx.createBiquadFilter();
+      pres.type = 'peaking';
+      pres.frequency.value = 3000;
+      pres.Q.value = 1;
+      pres.gain.value = S.presence;
+      mix.connect(pres).connect(env);
       // a little breath noise through the same envelope
       const breath = ctx.createBufferSource();
       breath.buffer = this.noise;
@@ -216,14 +254,11 @@
       bf.frequency.value = F[1][0];
       bf.Q.value = 1;
       const bg = ctx.createGain();
-      bg.gain.value = 0.05;
+      bg.gain.value = S.breath;
       breath.connect(bf).connect(bg).connect(env);
       env.connect(out);
       env.connect(this.reverb);
-      if (onset) {
-        // consonant tick
-        this._noise(t, 0.035, 'highpass', 3500, 0.12, out);
-      }
+      if (onset) this._noise(t, 0.03, 'highpass', 3500, 0.1, out);
       const end = t + dur + 0.2;
       this._track(src, end);
       this._track(src2, end);
@@ -232,8 +267,31 @@
       return [src, src2, lfo, breath];
     }
 
+    // Glottal pulse wave: rich harmonics that fall off like a real voice.
+    _glottal(tilt) {
+      this._waves = this._waves || {};
+      if (!this._waves[tilt]) {
+        const N = 48;
+        const real = new Float32Array(N);
+        const imag = new Float32Array(N);
+        for (let n = 1; n < N; n++) imag[n] = 1 / Math.pow(n, tilt);
+        this._waves[tilt] = this.ctx.createPeriodicWave(real, imag);
+      }
+      return this._waves[tilt];
+    }
+
+    _curve(amount) {
+      const n = 1024;
+      const c = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        c[i] = Math.tanh(x * amount) / Math.tanh(amount);
+      }
+      return c;
+    }
+
     // A steady reference tone you can hold against. Returns a stop() function.
-    drone(midi, vowel = 'a') {
+    drone(midi, vowel = 'a', singer = 'wolfie') {
       this.ensure();
       const ctx = this.ctx;
       const g = ctx.createGain();
@@ -243,7 +301,7 @@
       const holder = ctx.createGain();
       holder.connect(g);
       // reuse the voice for one long note
-      const nodes = this.voice(midi, this.now + 0.02, 600, vowel, false, holder);
+      const nodes = this.voice(midi, this.now + 0.02, 600, vowel, false, holder, singer);
       return () => {
         g.gain.setTargetAtTime(0.0001, this.now, 0.08);
         nodes.forEach((n) => { try { n.stop(this.now + 0.4); } catch (e) { /* already stopped */ } });
@@ -278,6 +336,32 @@
           o.connect(env);
           this._track(o, t + dur + 0.3);
         }
+      }
+    }
+
+    // Distorted electric guitar power chord (root, fifth, octave).
+    guitar(midi, t, dur, vel = 0.1) {
+      const ctx = this.ctx;
+      if (!this._gtrCurve) this._gtrCurve = this._curve(6);
+      const ws = ctx.createWaveShaper();
+      ws.curve = this._gtrCurve;
+      ws.oversample = '2x';
+      const pre = ctx.createGain();
+      pre.gain.value = 0.6;
+      const cab = ctx.createBiquadFilter();
+      cab.type = 'lowpass';
+      cab.frequency.value = 2600;
+      cab.Q.value = 0.8;
+      const lowcut = ctx.createBiquadFilter();
+      lowcut.type = 'highpass';
+      lowcut.frequency.value = 90;
+      const env = this._env(t, dur, vel, 0.004, 0.06);
+      pre.connect(ws).connect(lowcut).connect(cab).connect(env).connect(this.backingGain);
+      for (const [iv, det] of [[0, -7], [7, 5], [12, 0]]) {
+        const o = this._osc('sawtooth', mtof(midi + iv), t);
+        o.detune.value = det;
+        o.connect(pre);
+        this._track(o, t + dur + 0.1);
       }
     }
 
@@ -475,5 +559,5 @@
     }
   }
 
-  window.KWAudio = { Engine, mtof, vowelOf };
+  window.KWAudio = { Engine, mtof, vowelOf, SINGERS };
 })();
